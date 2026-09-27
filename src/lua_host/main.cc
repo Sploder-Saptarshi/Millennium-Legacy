@@ -121,23 +121,13 @@ static plugin_ipc::socket_fd connect_to_parent(const char* socket_path)
     }
 #endif
 
-    plugin_ipc::socket_fd fd = static_cast<plugin_ipc::socket_fd>(::socket(AF_UNIX, SOCK_STREAM, 0));
+    plugin_ipc::socket_fd fd = plugin_ipc::dial_endpoint(socket_path);
 #ifdef _WIN32
     if (fd == INVALID_SOCKET) {
 #else
     if (fd < 0) {
 #endif
-        fprintf(stderr, "[lua-host] socket() failed\n");
-        return plugin_ipc::INVALID_FD;
-    }
-
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         fprintf(stderr, "[lua-host] connect(%s) failed\n", socket_path);
-        plugin_ipc::close_fd(fd);
         return plugin_ipc::INVALID_FD;
     }
 

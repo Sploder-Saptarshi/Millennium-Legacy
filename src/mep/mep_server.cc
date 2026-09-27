@@ -30,6 +30,8 @@
 
 #include "mep/mep_server.h"
 #include "millennium/thread_guard.h"
+#include "millennium/plugin_ipc.h"
+#include "millennium/win7_compat.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -50,6 +52,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -195,10 +198,37 @@ void server::start()
 
     ::DeleteFileA(m_socket_path.c_str());
 
-    m_server_fd = static_cast<socket_t>(::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT));
-    if (m_server_fd == INVALID_SOCKET) {
-        m_running = false;
-        throw std::system_error(WSAGetLastError(), std::system_category(), "mep: WSASocket()");
+    // AF_UNIX only exists on Win10 1809+. On legacy hosts fall back to a
+    // TCP loopback listener and publish it via a rendezvous file so
+    // out-of-process clients can find the port.
+    const bool tcp_mode =
+#ifdef _WIN32
+        win7_compat::use_tcp_loopback();
+#else
+        false;
+#endif
+
+    if (tcp_mode) {
+        uint16_t port = 0;
+        m_server_fd = static_cast<socket_t>(plugin_ipc::listen_tcp_loopback(port));
+        if (m_server_fd == INVALID_SOCKET || port == 0) {
+            m_running = false;
+            throw std::system_error(WSAGetLastError(), std::system_category(), "mep: TCP loopback listen()");
+        }
+        m_socket_path = plugin_ipc::format_tcp_endpoint(port);
+        logger.log("mep: listening on TCP loopback {}", m_socket_path);
+        // Publish the endpoint for out-of-process clients (no fixed path
+        // exists in TCP mode, unlike the AF_UNIX socket file).
+        if (const char* tmp = std::getenv("TEMP")) {
+            std::ofstream rendezvous(std::string(tmp) + "\\millennium-mep.endpoint", std::ios::trunc);
+            if (rendezvous) rendezvous << m_socket_path;
+        }
+    } else {
+        m_server_fd = static_cast<socket_t>(::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT));
+        if (m_server_fd == INVALID_SOCKET) {
+            m_running = false;
+            throw std::system_error(WSAGetLastError(), std::system_category(), "mep: WSASocket()");
+        }
     }
 #else
     ::unlink(m_socket_path.c_str());
@@ -212,39 +242,41 @@ void server::start()
     set_noinherit(m_server_fd);
 #endif
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    ::strncpy(addr.sun_path, m_socket_path.c_str(), sizeof(addr.sun_path) - 1);
+    if (!tcp_mode) {
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        ::strncpy(addr.sun_path, m_socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
 #ifdef _WIN32
-    if (::bind(m_server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        close_socket(m_server_fd);
-        m_server_fd = -1;
-        m_running = false;
-        throw std::system_error(WSAGetLastError(), std::system_category(), "mep: bind()");
-    }
+        if (::bind(m_server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+            close_socket(m_server_fd);
+            m_server_fd = -1;
+            m_running = false;
+            throw std::system_error(WSAGetLastError(), std::system_category(), "mep: bind()");
+        }
 
-    if (::listen(m_server_fd, 16) == SOCKET_ERROR) {
-        close_socket(m_server_fd);
-        m_server_fd = -1;
-        m_running = false;
-        throw std::system_error(WSAGetLastError(), std::system_category(), "mep: listen()");
-    }
+        if (::listen(m_server_fd, 16) == SOCKET_ERROR) {
+            close_socket(m_server_fd);
+            m_server_fd = -1;
+            m_running = false;
+            throw std::system_error(WSAGetLastError(), std::system_category(), "mep: listen()");
+        }
 #else
-    if (::bind(m_server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        close_socket(m_server_fd);
-        m_server_fd = -1;
-        m_running = false;
-        throw std::system_error(errno, std::generic_category(), "mep: bind()");
-    }
+        if (::bind(m_server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            close_socket(m_server_fd);
+            m_server_fd = -1;
+            m_running = false;
+            throw std::system_error(errno, std::generic_category(), "mep: bind()");
+        }
 
-    if (::listen(m_server_fd, 16) < 0) {
-        close_socket(m_server_fd);
-        m_server_fd = -1;
-        m_running = false;
-        throw std::system_error(errno, std::generic_category(), "mep: listen()");
-    }
+        if (::listen(m_server_fd, 16) < 0) {
+            close_socket(m_server_fd);
+            m_server_fd = -1;
+            m_running = false;
+            throw std::system_error(errno, std::generic_category(), "mep: listen()");
+        }
 #endif
+    }
 
     m_accept_thread = thread_guard::make_thread("mep-accept", [this] { accept_loop(); });
 }
@@ -257,7 +289,12 @@ void server::stop()
 #ifdef _WIN32
         ::shutdown(m_server_fd, SD_BOTH);
         close_socket(m_server_fd);
-        ::DeleteFileA(m_socket_path.c_str());
+        // TCP endpoints have no socket file to remove (just the rendezvous).
+        if (!plugin_ipc::is_tcp_endpoint(m_socket_path)) {
+            ::DeleteFileA(m_socket_path.c_str());
+        } else if (const char* tmp = std::getenv("TEMP")) {
+            ::DeleteFileA((std::string(tmp) + "\\millennium-mep.endpoint").c_str());
+        }
 #else
         ::shutdown(m_server_fd, SHUT_RDWR);
         close_socket(m_server_fd);

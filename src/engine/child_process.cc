@@ -30,6 +30,7 @@
 
 #include "millennium/child_process.h"
 #include "millennium/thread_guard.h"
+#include "millennium/win7_compat.h"
 #include "millennium/logger.h"
 #include "millennium/plugin_ipc.h"
 #include "mep/crash_event_bus.h"
@@ -525,11 +526,27 @@ void PluginProcess::detect_child_exit()
 std::unique_ptr<PluginProcess> spawn_plugin_process(const std::string& plugin_name, const std::string& exe_path, const std::string& socket_path, const nlohmann::json& init_params,
                                                     PluginProcess::request_handler handler)
 {
+    /* The child dials this string back: a filesystem path (AF_UNIX) or, on
+       legacy Windows without AF_UNIX, "tcp://127.0.0.1:<port>". */
+    std::string dial_endpoint_str = socket_path;
+
     /* set up a listening socket for the child to connect back to */
     ::unlink(socket_path.c_str());
 
 #ifdef _WIN32
-    plugin_ipc::socket_fd server_fd = static_cast<plugin_ipc::socket_fd>(::socket(AF_UNIX, SOCK_STREAM, 0));
+    plugin_ipc::socket_fd server_fd = plugin_ipc::INVALID_FD;
+    if (win7_compat::use_tcp_loopback()) {
+        uint16_t tcp_port = 0;
+        server_fd = plugin_ipc::listen_tcp_loopback(tcp_port);
+        if (server_fd == plugin_ipc::INVALID_FD || tcp_port == 0) {
+            LOG_ERROR("[spawn] TCP loopback listen() failed for plugin '{}'", plugin_name);
+            return nullptr;
+        }
+        dial_endpoint_str = plugin_ipc::format_tcp_endpoint(tcp_port);
+        logger.log("[spawn] plugin '{}' IPC on TCP loopback {}", plugin_name, dial_endpoint_str);
+    } else {
+        server_fd = static_cast<plugin_ipc::socket_fd>(::socket(AF_UNIX, SOCK_STREAM, 0));
+    }
     if (server_fd == INVALID_SOCKET) {
 #else
     plugin_ipc::socket_fd server_fd = static_cast<plugin_ipc::socket_fd>(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
@@ -539,20 +556,22 @@ std::unique_ptr<PluginProcess> spawn_plugin_process(const std::string& plugin_na
         return nullptr;
     }
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
+    if (!plugin_ipc::is_tcp_endpoint(dial_endpoint_str)) {
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (::bind(server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        LOG_ERROR("[spawn] bind({}) failed for plugin '{}'", socket_path, plugin_name);
-        plugin_ipc::close_fd(server_fd);
-        return nullptr;
-    }
+        if (::bind(server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            LOG_ERROR("[spawn] bind({}) failed for plugin '{}'", socket_path, plugin_name);
+            plugin_ipc::close_fd(server_fd);
+            return nullptr;
+        }
 
-    if (::listen(server_fd, 1) < 0) {
-        LOG_ERROR("[spawn] listen() failed for plugin '{}'", plugin_name);
-        plugin_ipc::close_fd(server_fd);
-        return nullptr;
+        if (::listen(server_fd, 1) < 0) {
+            LOG_ERROR("[spawn] listen() failed for plugin '{}'", plugin_name);
+            plugin_ipc::close_fd(server_fd);
+            return nullptr;
+        }
     }
 
     /* fork the child */
@@ -575,7 +594,7 @@ std::unique_ptr<PluginProcess> spawn_plugin_process(const std::string& plugin_na
             LOG_ERROR("[spawn] CreateJobObjectW failed for plugin '{}' (error: {})", plugin_name, GetLastError());
         }
 
-        std::string cmd = "\"" + exe_path + "\" \"" + socket_path + "\"";
+        std::string cmd = "\"" + exe_path + "\" \"" + dial_endpoint_str + "\"";
 
         STARTUPINFOA si{};
         si.cb = sizeof(si);
@@ -620,7 +639,7 @@ std::unique_ptr<PluginProcess> spawn_plugin_process(const std::string& plugin_na
             ::prctl(PR_SET_PDEATHSIG, SIGHUP);
 #endif
             ::close(server_fd);
-            ::execl(exe_path.c_str(), exe_path.c_str(), socket_path.c_str(), nullptr);
+            ::execl(exe_path.c_str(), exe_path.c_str(), dial_endpoint_str.c_str(), nullptr);
             /* execl only returns on error */
             _exit(127);
         }

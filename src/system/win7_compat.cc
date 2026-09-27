@@ -109,4 +109,13 @@ bool auto_update_allowed()
     return true;
 #endif
 }
+
+bool use_tcp_loopback()
+{
+#ifdef _WIN32
+    return is_legacy_windows();
+#else
+    return false;
+#endif
+}
 } // namespace win7_compat

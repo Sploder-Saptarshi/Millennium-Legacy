@@ -38,18 +38,25 @@
 #define NOMINMAX
 #endif
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <poll.h>
+#else
+#include <afunix.h>
 #endif
 
 /**
@@ -192,6 +199,137 @@ inline void close_fd(socket_fd fd)
 #else
     ::close(fd);
 #endif
+}
+
+/**
+ * Transport endpoints.
+ *
+ * AF_UNIX sockets only exist on Windows 10 1809+. On legacy hosts (Win7/8/8.1,
+ * incl. under VxKex) IPC uses TCP loopback instead, encoded as
+ * "tcp://127.0.0.1:<port>". Anything else is a filesystem path for AF_UNIX.
+ * Framing (read_frame/write_frame) is transport-agnostic.
+ */
+inline bool is_tcp_endpoint(const std::string& endpoint)
+{
+    return endpoint.rfind("tcp://", 0) == 0;
+}
+
+inline std::string format_tcp_endpoint(uint16_t port)
+{
+    return "tcp://127.0.0.1:" + std::to_string(static_cast<unsigned>(port));
+}
+
+/* Extracts the port from a "tcp://127.0.0.1:<port>" endpoint, 0 on failure. */
+inline uint16_t parse_tcp_endpoint_port(const std::string& endpoint)
+{
+    if (!is_tcp_endpoint(endpoint)) return 0;
+    const std::string::size_type colon = endpoint.rfind(':');
+    if (colon == std::string::npos) return 0;
+    try {
+        const unsigned long port = std::stoul(endpoint.substr(colon + 1));
+        return port <= 0xFFFFu ? static_cast<uint16_t>(port) : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+/* Creates a listening TCP socket on 127.0.0.1:<ephemeral>, outputs the bound
+   port via out_port. Returns INVALID_FD on failure. */
+inline socket_fd listen_tcp_loopback(uint16_t& out_port)
+{
+    out_port = 0;
+#ifdef _WIN32
+    socket_fd fd = static_cast<socket_fd>(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+    if (fd == INVALID_SOCKET) return INVALID_FD;
+#else
+    socket_fd fd = static_cast<socket_fd>(::socket(AF_INET, SOCK_STREAM, 0));
+    if (fd < 0) return INVALID_FD;
+#endif
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0; /* ephemeral */
+
+#ifdef _WIN32
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR || ::listen(fd, 16) == SOCKET_ERROR) {
+        ::closesocket(fd);
+        return INVALID_FD;
+    }
+#else
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0 || ::listen(fd, 16) < 0) {
+        ::close(fd);
+        return INVALID_FD;
+    }
+#endif
+
+    sockaddr_in bound{};
+#ifdef _WIN32
+    int len = sizeof(bound);
+#else
+    socklen_t len = sizeof(bound);
+#endif
+    if (::getsockname(fd, reinterpret_cast<sockaddr*>(&bound), &len) != 0) {
+        close_fd(fd);
+        return INVALID_FD;
+    }
+    out_port = ntohs(bound.sin_port);
+    return fd;
+}
+
+/* Connects to either endpoint flavor. Returns INVALID_FD on failure. */
+inline socket_fd dial_endpoint(const std::string& endpoint)
+{
+    if (is_tcp_endpoint(endpoint)) {
+        const uint16_t port = parse_tcp_endpoint_port(endpoint);
+        if (port == 0) return INVALID_FD;
+#ifdef _WIN32
+        socket_fd fd = static_cast<socket_fd>(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+        if (fd == INVALID_SOCKET) return INVALID_FD;
+#else
+        socket_fd fd = static_cast<socket_fd>(::socket(AF_INET, SOCK_STREAM, 0));
+        if (fd < 0) return INVALID_FD;
+#endif
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = htons(port);
+#ifdef _WIN32
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+            ::closesocket(fd);
+            return INVALID_FD;
+        }
+#else
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            ::close(fd);
+            return INVALID_FD;
+        }
+#endif
+        return fd;
+    }
+
+#ifdef _WIN32
+    socket_fd fd = static_cast<socket_fd>(::socket(AF_UNIX, SOCK_STREAM, 0));
+    if (fd == INVALID_SOCKET) return INVALID_FD;
+#else
+    socket_fd fd = static_cast<socket_fd>(::socket(AF_UNIX, SOCK_STREAM, 0));
+    if (fd < 0) return INVALID_FD;
+#endif
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, endpoint.c_str(), sizeof(addr.sun_path) - 1);
+#ifdef _WIN32
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        ::closesocket(fd);
+        return INVALID_FD;
+    }
+#else
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        ::close(fd);
+        return INVALID_FD;
+    }
+#endif
+    return fd;
 }
 
 #ifdef _WIN32

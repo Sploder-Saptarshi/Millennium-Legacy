@@ -23,4 +23,8 @@ bool appmodel_runtime_available();
 // either not legacy, or the user explicitly opted in via
 // general.allowLegacyAutoUpdate.
 bool auto_update_allowed();
+
+// True when IPC must use TCP loopback instead of AF_UNIX (absent before
+// Win10 1809, and no VxKex shim can add an address family).
+bool use_tcp_loopback();
 } // namespace win7_compat
