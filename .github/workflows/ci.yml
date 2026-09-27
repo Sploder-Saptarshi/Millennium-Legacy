@@ -16,6 +16,16 @@ concurrency:
   group: ci-build
   cancel-in-progress: true
 
+# semantic-release (even --dry-run) verifies push access via
+# `git push --dry-run HEAD:<branch>`, so the default read-only GITHUB_TOKEN
+# fails with EGITNOPERMISSION/403. Grant write at the top level so `prepare`
+# (version check), `release` (tag push) and `update-pkgbuild` (PKGBUILD push)
+# all authenticate. Job-level blocks below remain as overrides.
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
