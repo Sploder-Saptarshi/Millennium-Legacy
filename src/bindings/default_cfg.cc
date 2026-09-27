@@ -54,6 +54,7 @@ json head::get_default_config()
             { "checkForPluginAndThemeUpdates", true },
             { "onMillenniumUpdate", static_cast<int>(updateBehavior) },
             { "millenniumUpdateChannel", "stable" },
+            { "allowLegacyAutoUpdate", false },
             { "shouldShowThemePluginUpdateNotifications", true },
             { "accentColor", "DEFAULT_ACCENT_COLOR" }
         } },

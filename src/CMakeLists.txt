@@ -86,6 +86,7 @@ set(SOURCE_FILES
     system/http.cc
     system/filesystem.cc
     system/health_check.cc
+    system/win7_compat.cc
     system/logger.cc
     millennium.cc
     mep/mep_message.cc
@@ -134,6 +135,7 @@ add_subdirectory(lua_host)
 
 if(WIN32)
     add_subdirectory(crash_handler)
+    add_subdirectory(shim/appmodel_stub)
 endif()
 
 if(UNIX AND NOT APPLE)

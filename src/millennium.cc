@@ -35,6 +35,7 @@
 #include "millennium/logger.h"
 #include "millennium/millennium_updater.h"
 #include "millennium/millennium.h"
+#include "millennium/win7_compat.h"
 #include "mep/mep_hooks.h"
 
 std::unique_ptr<millennium> g_millennium;
@@ -63,7 +64,17 @@ void millennium::check_for_updates()
         m_millennium_updater->check_for_updates();
 
         const auto update = m_millennium_updater->has_any_updates();
-        const bool should_auto_install = CONFIG.get({ "general", "onMillenniumUpdate" }, head::on_millennium_update::AUTO_INSTALL) == head::on_millennium_update::AUTO_INSTALL;
+        bool should_auto_install = CONFIG.get({ "general", "onMillenniumUpdate" }, head::on_millennium_update::AUTO_INSTALL) == head::on_millennium_update::AUTO_INSTALL;
+
+        // Legacy Windows (7/8/8.1, incl. under VxKex): the UCRT thread-startup
+        // path queries AppPolicyGetThreadInitializationType, which is absent
+        // there, and the download/extract/replace cycle touches files the
+        // compat layer does not fully cover. Stay notify-only unless the user
+        // explicitly opts in via general.allowLegacyAutoUpdate.
+        if (should_auto_install && !win7_compat::auto_update_allowed()) {
+            logger.warn("Legacy Windows host detected (Win7/8/8.1 or VxKex without AppModel runtime): auto-install disabled, please update manually.");
+            should_auto_install = false;
+        }
 
         if (!update["hasUpdate"]) {
             logger.log("No Millennium updates available.");

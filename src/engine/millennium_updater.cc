@@ -36,6 +36,7 @@
 #include "millennium/logger.h"
 #include "millennium/encoding.h"
 #include "millennium/zip.h"
+#include "millennium/win7_compat.h"
 #ifdef _WIN32
 #include "millennium/plat_msg.h"
 #endif
@@ -100,6 +101,10 @@ void millennium_updater::check_for_updates(const std::string& channel_override)
     if (!checkForUpdates) {
         logger.warn("User has disabled update checking for Millennium.");
         return;
+    }
+
+    if (win7_compat::is_legacy_windows()) {
+        logger.warn("Legacy Windows host detected (Win7/8/8.1 or VxKex without AppModel runtime): update check is notify-only, auto-install is disabled.");
     }
 
     logger.log("Checking for updates on {} channel...", channel);
@@ -345,6 +350,14 @@ void millennium_updater::win32_move_old_millennium_version([[maybe_unused]] std:
 
 void millennium_updater::update_impl(const std::string& downloadUrl, const size_t downloadSize)
 {
+    // Defense in depth: the caller (millennium::check_for_updates and update)
+    // already refuses legacy auto-install, but frontend IPC can invoke
+    // Core_UpdateMillennium directly, so refuse here too instead of
+    // half-downloading and terminating the Steam process.
+    if (!win7_compat::auto_update_allowed()) {
+        throw std::runtime_error("Auto-update is disabled on legacy Windows hosts (Win7/8/8.1 or VxKex without AppModel runtime). Update manually or set general.allowLegacyAutoUpdate.");
+    }
+
     std::filesystem::path tempFilePath;
 
     auto cleanup_temp_file = [&tempFilePath]()
@@ -440,6 +453,14 @@ bool millennium_updater::is_pending_restart()
 
 void millennium_updater::update(const std::string& downloadUrl, const size_t downloadSize, bool background)
 {
+    // Refuse before touching m_update_in_progress so a denied legacy request
+    // does not wedge the state machine into "update in progress" forever.
+    if (!win7_compat::auto_update_allowed()) {
+        logger.warn("Refusing auto-update on legacy Windows host (Win7/8/8.1 or VxKex without AppModel runtime). Update manually or set general.allowLegacyAutoUpdate.");
+        this->dispatch_progress_to_frontend("Auto-update is disabled on legacy Windows hosts. Please update manually.", 0.0f, true);
+        return;
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_state_mutex);
 
