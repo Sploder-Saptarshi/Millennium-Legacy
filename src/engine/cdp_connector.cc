@@ -30,6 +30,7 @@
 
 #include "millennium/cdp_connector.h"
 #include "millennium/logger.h"
+#include "millennium/thread_guard.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -138,7 +139,7 @@ void socket_utils::connect_socket(std::shared_ptr<socket_utils::socket_t> socket
     stop_pipe_drain();
 
     /** start the read loop on a background thread so messages flow immediately */
-    std::thread read_thread([hRead = g_cdp_pipe_read, cdp, name]()
+    std::thread read_thread = thread_guard::make_thread("cdp-pipe-read", [hRead = g_cdp_pipe_read, cdp, name]()
     {
         pipe_read_loop(hRead, cdp);
         logger.log("[{}] CDP pipe read loop exited.", name);
@@ -151,7 +152,7 @@ void socket_utils::connect_socket(std::shared_ptr<socket_utils::socket_t> socket
     }
 
     HANDLE read_thread_handle = read_thread.native_handle();
-    std::thread terminate_watcher([cdp, read_thread_handle]()
+    std::thread terminate_watcher = thread_guard::make_thread("cdp-terminate-watch", [cdp, read_thread_handle]()
     {
         millennium_lifecycle::get().terminate.wait();
         CancelSynchronousIo(read_thread_handle);
@@ -315,7 +316,7 @@ void socket_utils::connect_socket(std::shared_ptr<socket_utils::socket_t> socket
 
     logger.log("[{}] CDP pipe transport connected.", name);
 
-    std::thread read_thread([read_fd, cancel_fd, cdp, name]()
+    std::thread read_thread = thread_guard::make_thread("cdp-pipe-read", [read_fd, cancel_fd, cdp, name]()
     {
         pipe_read_loop(read_fd, cancel_fd, g_cdp_pipe_change_efd, cdp);
         logger.log("[{}] CDP pipe read loop exited.", name);
@@ -329,7 +330,7 @@ void socket_utils::connect_socket(std::shared_ptr<socket_utils::socket_t> socket
 
     auto connection_closed = std::make_shared<std::atomic<bool>>(false);
 
-    std::thread terminate_watcher([cdp, cancel_fd, connection_closed]()
+    std::thread terminate_watcher = thread_guard::make_thread("cdp-terminate-watch", [cdp, cancel_fd, connection_closed]()
     {
         std::unique_lock<std::mutex> lk(millennium_lifecycle::get().terminate.mtx);
         millennium_lifecycle::get().terminate.cv.wait(lk, [&]

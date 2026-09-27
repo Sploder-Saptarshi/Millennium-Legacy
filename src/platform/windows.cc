@@ -61,6 +61,7 @@ CONSTRUCTOR VOID Win32_InitializeEnvironment(VOID)
 }
 
 #include "millennium/millennium_lifecycle.h"
+#include "millennium/thread_guard.h"
 
 BOOL AreFilesIdentical(LPCWSTR path1, LPCWSTR path2)
 {
@@ -330,7 +331,7 @@ DLL_EXPORT INT WINAPI DllMain([[maybe_unused]] HINSTANCE hinstDLL, DWORD fdwReas
             logger.log("Millennium-x86_64@{} attached...", MILLENNIUM_VERSION);
             register_dll_notifications();
 
-            g_millenniumThread = std::thread(Win32_AttachMillennium);
+            g_millenniumThread = thread_guard::make_thread("Win32_AttachMillennium", Win32_AttachMillennium);
             break;
         }
         case DLL_PROCESS_DETACH:

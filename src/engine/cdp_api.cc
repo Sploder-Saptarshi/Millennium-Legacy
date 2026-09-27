@@ -30,6 +30,7 @@
 
 #include "millennium/cdp_api.h"
 #include "millennium/logger.h"
+#include "millennium/thread_guard.h"
 #include "millennium/thread_pool.h"
 #include <condition_variable>
 #include <deque>
@@ -39,9 +40,9 @@
 cdp_client::cdp_client(send_fn sender) : m_sender(std::move(sender)), m_callback_pool(std::make_shared<thread_pool>(4))
 {
     /** start the cleanup thread worker */
-    m_cleanup_thread = std::thread(&cdp_client::cleanup_loop, this);
+    m_cleanup_thread = thread_guard::make_thread("cdp-cleanup", [this] { cleanup_loop(); });
     /** start the incoming message worker */
-    m_incoming_worker = std::thread([this]()
+    m_incoming_worker = thread_guard::make_thread("cdp-incoming", [this]()
     {
         while (!m_shutdown.load(std::memory_order_acquire)) {
             std::string payload;

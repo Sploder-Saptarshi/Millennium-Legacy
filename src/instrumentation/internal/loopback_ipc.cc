@@ -33,6 +33,7 @@
 #include "mep/patch_stream_recorder.h"
 #include "mep/patch_update_notifier.h"
 #include "millennium/logger.h"
+#include "millennium/thread_guard.h"
 #include <nlohmann/json.hpp>
 
 #include <atomic>
@@ -252,8 +253,9 @@ void register_loopback_conn(fd_t write_fd, fd_t read_fd)
         }
     });
 
-    std::thread([conn = std::move(conn)]() mutable
+    std::thread reader = thread_guard::make_thread("loopback-reader", [conn = std::move(conn)]() mutable
     {
         reader_loop(std::move(conn));
-    }).detach();
+    });
+    reader.detach();
 }

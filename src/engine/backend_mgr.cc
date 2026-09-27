@@ -34,6 +34,7 @@
 #include "millennium/logger.h"
 #include "millennium/plugin_ipc.h"
 #include "millennium/star_parser.h"
+#include "millennium/thread_guard.h"
 #include "instrumentation/patch_registry.h"
 #include "mep/patch_update_notifier.h"
 
@@ -100,11 +101,11 @@ void backend_manager::shutdown()
     for (auto& kv : m_processes) {
         auto& name = kv.first;
         auto& process = kv.second;
-        shutdown_threads.emplace_back([&name, &process]()
+        shutdown_threads.emplace_back(thread_guard::make_thread("plugin-shutdown", [&name, &process]()
         {
             logger.log("Shutting down plugin '{}'...", name);
             process->shutdown();
-        });
+        }));
     }
 
     for (auto& t : shutdown_threads) {

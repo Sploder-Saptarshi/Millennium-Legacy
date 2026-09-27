@@ -61,6 +61,8 @@ thread_pool::thread_pool(size_t num_threads) : stop(false), shutdown_called(fals
                     task();
                 } catch (const std::exception& ex) {
                     logger.log(std::string("ThreadPool worker exception: ") + ex.what());
+                } catch (...) {
+                    logger.log(std::string("ThreadPool worker unknown exception"));
                 }
             }
         });

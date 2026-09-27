@@ -1,4 +1,5 @@
 #include "millennium/file_watcher.h"
+#include "millennium/thread_guard.h"
 
 #ifndef _WIN32
 #include <sys/inotify.h>
@@ -22,7 +23,7 @@ void file_watcher::start()
 {
     if (m_running.load()) return;
     m_running.store(true);
-    m_thread = std::thread(&file_watcher::watch_loop, this);
+    m_thread = thread_guard::make_thread("file-watcher", [this] { watch_loop(); });
 }
 
 void file_watcher::stop()

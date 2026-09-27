@@ -49,6 +49,7 @@
 #include "millennium/plugin_webkit_store.h"
 #include "millennium/semver.h"
 #include "millennium/auth.h"
+#include "millennium/thread_guard.h"
 
 #include "instrumentation/patch_registry.h"
 
@@ -253,7 +254,7 @@ std::shared_ptr<std::thread> plugin_loader::connect_steam_socket(std::shared_ptr
     {
         this->devtools_connection_hdlr(std::move(cdp));
     };
-    return std::make_shared<std::thread>(std::thread([ptrSocketHelpers = socketHelpers, browserProps]
+    return std::make_shared<std::thread>(thread_guard::make_thread("steam-socket", [ptrSocketHelpers = socketHelpers, browserProps]
     {
         ptrSocketHelpers->connect_socket(browserProps);
     }));

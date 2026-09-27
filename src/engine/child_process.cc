@@ -29,6 +29,7 @@
  */
 
 #include "millennium/child_process.h"
+#include "millennium/thread_guard.h"
 #include "millennium/logger.h"
 #include "millennium/plugin_ipc.h"
 #include "mep/crash_event_bus.h"
@@ -116,7 +117,7 @@ static PluginProcess::process_metrics read_proc_metrics(HANDLE hProcess)
 PluginProcess::PluginProcess(const std::string& plugin_name, const std::string& socket_path, plugin_ipc::socket_fd client_fd, pid_type pid, request_handler handler)
     : m_plugin_name(plugin_name), m_socket_path(socket_path), m_client_fd(client_fd), m_pid(pid), m_request_handler(std::move(handler))
 {
-    m_reader_thread = std::thread(&PluginProcess::reader_thread_fn, this);
+    m_reader_thread = thread_guard::make_thread("plugin-reader", [this] { reader_thread_fn(); });
 }
 
 PluginProcess::~PluginProcess()

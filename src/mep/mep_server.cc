@@ -29,6 +29,7 @@
  */
 
 #include "mep/mep_server.h"
+#include "millennium/thread_guard.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -245,7 +246,7 @@ void server::start()
     }
 #endif
 
-    m_accept_thread = std::thread(&server::accept_loop, this);
+    m_accept_thread = thread_guard::make_thread("mep-accept", [this] { accept_loop(); });
 }
 
 void server::stop()
@@ -290,8 +291,11 @@ void server::accept_loop()
 
         std::thread([this, client_fd]()
         {
-            handle_client(client_fd);
-            close_socket(client_fd);
+            thread_guard::run("mep-client", [this, client_fd]()
+            {
+                handle_client(client_fd);
+                close_socket(client_fd);
+            });
         }).detach();
     }
 }

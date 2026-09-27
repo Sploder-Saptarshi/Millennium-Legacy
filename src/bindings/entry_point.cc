@@ -424,6 +424,9 @@ builtin_payload head::millennium_backend::Core_InstallTheme(const builtin_payloa
         } catch (const std::exception& e) {
             LOG_ERROR("Background theme install failed: {}", e.what());
             updater->dispatch_progress("Install failed", 0, true, false);
+        } catch (...) {
+            LOG_ERROR("Background theme install failed with unknown exception.");
+            updater->dispatch_progress("Install failed", 0, true, false);
         }
     }).detach();
 
@@ -459,6 +462,9 @@ builtin_payload head::millennium_backend::Core_DownloadThemeUpdate(const builtin
             }
         } catch (const std::exception& e) {
             LOG_ERROR("Background theme update failed: {}", e.what());
+            updater->dispatch_progress("Update failed", 0, true, false);
+        } catch (...) {
+            LOG_ERROR("Background theme update failed with unknown exception.");
             updater->dispatch_progress("Update failed", 0, true, false);
         }
     }).detach();
@@ -505,6 +511,9 @@ builtin_payload head::millennium_backend::Core_DownloadPluginUpdate(const builti
             }
         } catch (const std::exception& e) {
             LOG_ERROR("Background plugin update failed: {}", e.what());
+            updater->dispatch_progress("Update failed", 0, true, false);
+        } catch (...) {
+            LOG_ERROR("Background plugin update failed with unknown exception.");
             updater->dispatch_progress("Update failed", 0, true, false);
         }
     }).detach();
@@ -571,6 +580,9 @@ builtin_payload head::millennium_backend::Core_InstallPlugin(const builtin_paylo
             }
         } catch (const std::exception& e) {
             LOG_ERROR("Background plugin install failed: {}", e.what());
+            updater->dispatch_progress("Install failed", 0, true, false);
+        } catch (...) {
+            LOG_ERROR("Background plugin install failed with unknown exception.");
             updater->dispatch_progress("Install failed", 0, true, false);
         }
     }).detach();

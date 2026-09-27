@@ -45,6 +45,7 @@
 #endif
 #include "millennium/filesystem.h" // IWYU pragma: keep
 #include "millennium/logger.h"
+#include "millennium/thread_guard.h"
 #include "millennium/steam_hooks.h"
 #include "millennium/cmdline_api.h"
 #include "millennium/cmdline_parser.h"
@@ -339,7 +340,7 @@ const char* Plat_HookedCreateSimpleProcess(const char* cmd, bool* matched = null
                        reinterpret_cast<uintptr_t>(hChildWrite), reinterpret_cast<uintptr_t>(hParentRead), reinterpret_cast<uintptr_t>(hParentWrite));
 
             g_pipe_drain_stop = false;
-            g_pipe_drain_thread = std::thread([hRead = hParentRead]()
+            g_pipe_drain_thread = thread_guard::make_thread("cdp-pipe-drain", [hRead = hParentRead]()
             {
                 char buf[4096];
                 DWORD bytesRead = 0;
