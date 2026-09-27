@@ -224,6 +224,17 @@ endif()
 
 find_steam_path(Millennium)
 
+# The AppModel api-set stub must resolve app-locally, i.e. live next to
+# steam.exe (package root), NOT in millennium/lib. find_steam_path() would
+# route a SHARED_LIBRARY to millennium/lib, so override to the Steam root.
+# out_steam_path is set in this scope by the call above.
+if(WIN32 AND MILLENNIUM_BUILD_TO_STEAM_PATH AND out_steam_path)
+    set_target_properties(appmodel_stub PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${out_steam_path}"
+        LIBRARY_OUTPUT_DIRECTORY "${out_steam_path}"
+    )
+endif()
+
 if (WIN32 AND MILLENNIUM_BUILD_TO_STEAM_PATH)
     message(STATUS "[MLNM] Build Path: ${out_steam_path}")
 endif()

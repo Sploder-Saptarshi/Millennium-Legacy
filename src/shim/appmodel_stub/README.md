@@ -10,9 +10,13 @@ Without it, any `std::thread` creation under VxKex can end in
 
 ## Deploy
 
-Copy the built DLL next to `steam.exe` (and optionally next to
-`millennium.dll`). The loader resolves the api-set contract app-locally
-first. No registry or VxKex config change needed.
+Dev builds (`MILLENNIUM_BUILD_TO_STEAM_PATH`) output the DLL straight to the
+Steam root via `src/CMakeLists.txt`; CI (`ci.yml:build-windows`) copies it to
+the package root. Either way it ships next to `steam.exe` (and `wsock32.dll`),
+never in `millennium/lib` — the loader only resolves the api-set contract
+app-locally from the process image directory. Manual fallback: copy the built
+`api-ms-win-appmodel-runtime-l1-1-2.dll` next to `steam.exe` yourself. No
+registry or VxKex config change needed.
 
 ## Interplay with guards
 

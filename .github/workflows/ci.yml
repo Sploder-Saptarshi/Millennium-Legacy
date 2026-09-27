@@ -117,6 +117,16 @@ jobs:
           Copy-Item ./build/millennium.luavm64.exe        D:/a/millennium-build/millennium/bin/millennium.luavm64.exe
           Copy-Item ./build/millennium.crashhandler64.exe D:/a/millennium-build/millennium/bin/millennium.crashhandler64.exe
 
+          # AppModel api-set stub for legacy Windows (Win7/8/8.1, VxKex).
+          # Must ship at package root (= Steam dir) so the loader resolves
+          # it app-locally next to steam.exe, not from millennium/lib.
+          $stubDll = Get-ChildItem -Path ./build -Recurse -Filter "api-ms-win-appmodel-runtime-l1-1-2.dll" | Select-Object -First 1
+          if ($stubDll) {
+            Copy-Item $stubDll.FullName D:/a/millennium-build/api-ms-win-appmodel-runtime-l1-1-2.dll
+          } else {
+            Write-Warning "AppModel stub DLL not found in ./build; legacy-Windows package will lack it."
+          }
+
           # Collect PDB files for debug symbols
           New-Item -ItemType Directory -Force -Path D:/a/pdb
           Get-ChildItem -Path ./build -Recurse -Filter *.pdb | Copy-Item -Destination D:/a/pdb/
